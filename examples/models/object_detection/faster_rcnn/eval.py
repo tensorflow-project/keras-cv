@@ -517,7 +517,7 @@ def eval_pycoco_step(examples):
         clip_boxes=False,
     )
 
-    visualize_image(examples["raw_images"], box_pred, gt_boxes)
+    # visualize_image(examples["raw_images"], box_pred, gt_boxes)
 
     ground_truth = {}
     ground_truth["source_id"] = examples["source_id"]
