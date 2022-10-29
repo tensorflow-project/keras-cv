@@ -105,7 +105,11 @@ class SegmentationHead(layers.Layer):
         lowest level of feature output as the input for the head.
         """
         if not isinstance(inputs, dict):
-            raise ValueError(f"Expect the inputs to be a dict, but received {inputs}")
+            x = inputs
+            if self.output_scale_factor is not None:
+                x = tf.keras.layers.UpSampling2D(self.output_scale_factor)(x)
+            return self._classification_layer(x)
+            # raise ValueError(f"Expect the inputs to be a dict, but received {inputs}")
 
         lowest_level = next(iter(sorted(inputs)))
         x = inputs[lowest_level]

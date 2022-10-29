@@ -29,6 +29,7 @@ import matplotlib.pyplot as plt
 import keras_cv
 from keras_cv.datasets.pascal_voc.segmentation import load
 from keras_cv.models.segmentation.deeplab import DeepLabV3
+from keras_cv.models.segmentation.resnet_deeplab import ResnetDeepLabV3
 
 flags.DEFINE_string(
     "weights_path",
@@ -183,6 +184,12 @@ def resize_fn(image, cls_seg):
     )
     return image, cls_seg
 
+def flip_fn(image, cls_seg):
+    if tf.random.uniform([], minval=0, maxval=1, dtype=tf.float32) > 0.5:
+        image = tf.image.flip_left_right(image)
+        cls_seg = tf.reverse(cls_seg, axis=[1])
+    return image, cls_seg
+
 def proc_train_fn(examples):
     image = examples.pop("image")
     image = tf.cast(image, tf.float32)
@@ -194,6 +201,7 @@ def proc_train_fn(examples):
     # cls_seg = tf.where(mask, zeros, cls_seg)
     # cls_seg = resize_layer(cls_seg)
     image, cls_seg = resize_fn(image, cls_seg)
+    image, cls_seg = flip_fn(image, cls_seg)
     cls_seg = tf.cast(cls_seg, tf.uint8)
     # tf.print("cls seg unique values", tf.unique(tf.reshape(cls_seg, [-1]))[0])
     sample_weight = tf.equal(cls_seg, 255)
@@ -229,9 +237,10 @@ with strategy.scope():
         values=[base_lr, 0.1 * base_lr],
     )
     backbone = keras_cv.models.ResNet50V2(
-        include_rescaling=True, weights="imagenet", include_top=False
-    ).as_backbone()
-    model = DeepLabV3(classes=21, backbone=backbone, include_rescaling=True)
+        include_rescaling=True, weights="imagenet", include_top=False,
+        input_shape=[512, 512, 3]
+    )
+    model = ResnetDeepLabV3(classes=21, backbone=backbone, include_rescaling=True)
     optimizer = tf.keras.optimizers.SGD(
         learning_rate=lr_decay, momentum=0.9, clipnorm=10.0
     )

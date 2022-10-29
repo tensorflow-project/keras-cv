@@ -41,6 +41,7 @@ MODEL_CONFIGS = {
         "stackwise_filters": [64, 128, 256, 512],
         "stackwise_blocks": [3, 4, 6, 3],
         "stackwise_strides": [1, 2, 2, 2],
+        "stackwise_dilations": [1, 1, 1, 2],
     },
     "ResNet101V2": {
         "stackwise_filters": [64, 128, 256, 512],
@@ -162,7 +163,7 @@ def BasicBlock(filters, kernel_size=3, stride=1, conv_shortcut=False, name=None)
     return apply
 
 
-def Block(filters, kernel_size=3, stride=1, conv_shortcut=False, name=None):
+def Block(filters, kernel_size=3, stride=1, dilation=1, conv_shortcut=False, name=None):
     """A residual block (v2).
     Args:
         filters: integer, filters of the bottleneck layer.
@@ -186,14 +187,15 @@ def Block(filters, kernel_size=3, stride=1, conv_shortcut=False, name=None):
             "relu", name=name + "_use_preactivation_relu"
         )(use_preactivation)
 
+        s = stride if dilation == 1 else 1
         if conv_shortcut:
             shortcut = layers.Conv2D(
-                4 * filters, 1, strides=stride, name=name + "_0_conv"
+                4 * filters, 1, strides=s, name=name + "_0_conv"
             )(use_preactivation)
         else:
             shortcut = (
                 layers.MaxPooling2D(1, strides=stride, name=name + "_0_max_pooling")(x)
-                if stride > 1
+                if s > 1
                 else x
             )
 
@@ -205,12 +207,14 @@ def Block(filters, kernel_size=3, stride=1, conv_shortcut=False, name=None):
         )(x)
         x = layers.Activation("relu", name=name + "_1_relu")(x)
 
-        x = layers.ZeroPadding2D(padding=((1, 1), (1, 1)), name=name + "_2_pad")(x)
+        # x = layers.ZeroPadding2D(padding=((1, 1), (1, 1)), name=name + "_2_pad")(x)
         x = layers.Conv2D(
             filters,
             kernel_size,
-            strides=stride,
+            strides=s,
             use_bias=False,
+            padding="same",
+            dilation_rate=dilation,
             name=name + "_2_conv",
         )(x)
         x = layers.BatchNormalization(
@@ -229,6 +233,7 @@ def Stack(
     filters,
     blocks,
     stride=2,
+    dilations=1,
     name=None,
     block_fn=Block,
     first_shortcut=True,
@@ -252,8 +257,8 @@ def Stack(
     def apply(x):
         x = block_fn(filters, conv_shortcut=first_shortcut, name=name + "_block1")(x)
         for i in range(2, blocks):
-            x = block_fn(filters, name=name + "_block" + str(i))(x)
-        x = block_fn(filters, stride=stride, name=name + "_block" + str(blocks))(x)
+            x = block_fn(filters, dilation=dilations, name=name + "_block" + str(i))(x)
+        x = block_fn(filters, stride=stride, dilation=dilations, name=name + "_block" + str(blocks))(x)
         return x
 
     return apply
@@ -263,6 +268,7 @@ def ResNetV2(
     stackwise_filters,
     stackwise_blocks,
     stackwise_strides,
+    stackwise_dilations,
     include_rescaling,
     include_top,
     name="ResNetV2",
@@ -352,7 +358,9 @@ def ResNetV2(
             filters=stackwise_filters[stack_index],
             blocks=stackwise_blocks[stack_index],
             stride=stackwise_strides[stack_index],
+            dilations=stackwise_dilations[stack_index],
             block_fn=block_fn,
+            name=str(stack_index) + "_stack",
             first_shortcut=block_fn == Block or stack_index > 0,
             stack_index=stack_index,
         )(x)
@@ -528,6 +536,7 @@ def ResNet50V2(
         stackwise_filters=MODEL_CONFIGS["ResNet50V2"]["stackwise_filters"],
         stackwise_blocks=MODEL_CONFIGS["ResNet50V2"]["stackwise_blocks"],
         stackwise_strides=MODEL_CONFIGS["ResNet50V2"]["stackwise_strides"],
+        stackwise_dilations=MODEL_CONFIGS["ResNet50V2"]["stackwise_dilations"],
         include_rescaling=include_rescaling,
         include_top=include_top,
         name=name,

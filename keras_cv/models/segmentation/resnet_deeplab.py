@@ -13,11 +13,89 @@
 # limitations under the License.
 
 import tensorflow as tf
+from tensorflow.keras import layers
 
 import keras_cv
 
+BN_AXIS = 3
 
-class DeepLabV3(tf.keras.models.Model):
+def Block(filters, kernel_size=3, stride=1, conv_shortcut=True, name=None):
+    """A residual block.
+    Args:
+      x: input tensor.
+      filters: integer, filters of the bottleneck layer.
+      kernel_size: default 3, kernel size of the bottleneck layer.
+      stride: default 1, stride of the first layer.
+      conv_shortcut: default True, use convolution shortcut if True,
+          otherwise identity shortcut.
+      name: string, block label.
+    Returns:
+      Output tensor for the residual block.
+    """
+
+    def apply(x):
+        if conv_shortcut:
+            shortcut = layers.Conv2D(
+                4 * filters, 1, strides=stride, use_bias=False, name=name + "_0_conv"
+            )(x)
+            shortcut = layers.BatchNormalization(
+                axis=BN_AXIS, epsilon=1.001e-5, name=name + "_0_bn"
+            )(shortcut)
+        else:
+            shortcut = x
+
+        x = layers.Conv2D(
+            filters, 1, strides=stride, use_bias=False, name=name + "_1_conv"
+        )(x)
+        x = layers.BatchNormalization(
+            axis=BN_AXIS, epsilon=1.001e-5, name=name + "_1_bn"
+        )(x)
+        x = layers.Activation("relu", name=name + "_1_relu")(x)
+
+        x = layers.Conv2D(
+            filters, kernel_size, padding="SAME", dilation_rate=2, use_bias=False, name=name + "_2_conv"
+        )(x)
+        x = layers.BatchNormalization(
+            axis=BN_AXIS, epsilon=1.001e-5, name=name + "_2_bn"
+        )(x)
+        x = layers.Activation("relu", name=name + "_2_relu")(x)
+
+        x = layers.Conv2D(4 * filters, 1, use_bias=False, name=name + "_3_conv")(x)
+        x = layers.BatchNormalization(
+            axis=BN_AXIS, epsilon=1.001e-5, name=name + "_3_bn"
+        )(x)
+
+        x = layers.Add(name=name + "_add")([shortcut, x])
+        x = layers.Activation("relu", name=name + "_out")(x)
+        return x
+
+    return apply
+
+def Stack(filters, blocks, stride=2, name=None, block_fn=Block, first_shortcut=True):
+    """A set of stacked residual blocks.
+    Args:
+      filters: integer, filters of the layers in a block.
+      blocks: integer, blocks in the stacked blocks.
+      stride1: default 2, stride of the first layer in the first block.
+      name: string, stack label.
+      block_fn: callable, `Block` or `BasicBlock`, the block function to stack.
+      first_shortcut: default True, use convolution shortcut if True,
+          otherwise identity shortcut.
+    Returns:
+      Output tensor for the stacked blocks.
+    """
+
+    def apply(x):
+        x = block_fn(
+            filters, stride=stride, name=name + "_block1", conv_shortcut=first_shortcut
+        )(x)
+        for i in range(2, blocks + 1):
+            x = block_fn(filters, conv_shortcut=False, name=name + "_block" + str(i))(x)
+        return x
+
+    return apply
+
+class ResnetDeepLabV3(tf.keras.models.Model):
     """A segmentation model based on the DeepLab v3.
 
     Args:
@@ -45,7 +123,6 @@ class DeepLabV3(tf.keras.models.Model):
         classes,
         include_rescaling,
         backbone="resnet50_v2",
-        decoder="fpn",
         segmentation_head=None,
         **kwargs,
     ):
@@ -64,10 +141,21 @@ class DeepLabV3(tf.keras.models.Model):
                 )
             self._backbone_passed = backbone
             if backbone == "resnet50_v2":
-                backbone = keras_cv.models.ResNet50V2(
-                    include_rescaling=include_rescaling, include_top=False
+                backbone = keras_cv.models.ResNet50(
+                    include_rescaling=include_rescaling, include_top=False,
+                    input_shape=[512, 512, 3]
                 )
-                backbone = backbone.as_backbone()
+                inputs = tf.keras.Input(shape=[None, None, 3])
+                outputs = backbone(inputs)
+                # outputs = Stack(
+                #     filters=512,
+                #     blocks=3,
+                #     stride=1,
+                #     block_fn=Block,
+                #     name="4prime_stack",
+                # )(outputs)
+                backbone = tf.keras.Model(inputs=inputs, outputs=outputs)
+                # backbone = backbone.as_backbone()
                 self.backbone = backbone
         else:
             # TODO(scottzhu): Might need to do more assertion about the model
@@ -78,55 +166,23 @@ class DeepLabV3(tf.keras.models.Model):
                 )
             self.backbone = backbone
 
-        # ================== decoder ==================
-        if isinstance(decoder, str):
-            # TODO(scottzhu): Add ASPP decoder.
-            supported_premade_decoder = ["fpn"]
-            if decoder not in supported_premade_decoder:
-                raise ValueError(
-                    "Supported premade decoder are: "
-                    f'{supported_premade_decoder}, received "{decoder}"'
-                )
-            self._decoder_passed = decoder
-            if decoder == "fpn":
-                # Infer the FPN level from the backbone. If user need to customize
-                # this setting, they should manually create the FPN and backbone.
-                if not isinstance(backbone.output, dict):
-                    raise ValueError(
-                        "Expect the backbone's output to be dict, "
-                        f"received {backbone.output}"
-                    )
-                backbone_levels = list(backbone.output.keys())
-                min_level = backbone_levels[0]
-                max_level = backbone_levels[-1]
-                decoder = keras_cv.layers.FeaturePyramid(
-                    min_level=min_level, max_level=max_level
-                )
-
-        # TODO(scottzhu): do more validation for the decoder when we have a common
-        # interface.
-        self.decoder = decoder
-
         self._segmentation_head_passed = segmentation_head
         if segmentation_head is None:
             # Scale up the output when using FPN, to keep the output shape same as the
             # input shape.
-            if isinstance(self.decoder, keras_cv.layers.FeaturePyramid):
-                output_scale_factor = pow(2, self.decoder.min_level)
-            else:
-                output_scale_factor = None
+            output_scale_factor = 16
 
             segmentation_head = (
                 keras_cv.models.segmentation.__internal__.SegmentationHead(
-                    classes=classes, output_scale_factor=output_scale_factor
+                    classes=classes, convs=0, output_scale_factor=output_scale_factor
                 )
             )
         self.segmentation_head = segmentation_head
 
     def call(self, inputs, training=None):
         backbone_output = self.backbone(inputs, training=training)
-        decoder_output = self.decoder(backbone_output, training=training)
-        return self.segmentation_head(decoder_output, training=training)
+        y_pred = self.segmentation_head(backbone_output, training=training)
+        return y_pred
 
     # TODO(tanzhenyu): consolidate how regularization should be applied to KerasCV.
     def compile(self, weight_decay=0.0001, **kwargs):
