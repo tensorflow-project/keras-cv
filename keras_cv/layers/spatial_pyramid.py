@@ -77,16 +77,18 @@ class SpatialPyramidPooling(tf.keras.layers.Layer):
     def build(self, input_shape):
         # Retrieve the input at the level so that we can get the exact shape.
         if not isinstance(input_shape, dict):
-            raise ValueError(
-                "SpatialPyramidPooling expects input features to be a dict with int keys, "
-                f"received {input_shape}"
-            )
-        if self.level not in input_shape:
-            raise ValueError(
-                f"SpatialPyramidPooling expect the input dict to contain key {self.level}, "
-                f"received {input_shape}"
-            )
-        input_shape_at_level = input_shape[self.level]
+            # raise ValueError(
+            #     "SpatialPyramidPooling expects input features to be a dict with int keys, "
+            #     f"received {input_shape}"
+            # )
+            input_shape_at_level = input_shape
+        else:
+            if self.level not in input_shape:
+                raise ValueError(
+                    f"SpatialPyramidPooling expect the input dict to contain key {self.level}, "
+                    f"received {input_shape}"
+                )
+            input_shape_at_level = input_shape[self.level]
 
         height = input_shape_at_level[1]
         width = input_shape_at_level[2]
@@ -174,16 +176,18 @@ class SpatialPyramidPooling(tf.keras.layers.Layer):
               of the output should be [batch, height_l, width_l, num_channels]
         """
         if not isinstance(inputs, dict):
-            raise ValueError(
-                "SpatialPyramidPooling expects input features to be a dict with int keys, "
-                f"received {inputs}"
-            )
-        if self.level not in inputs:
-            raise ValueError(
-                f"SpatialPyramidPooling expect the input dict to contain key {self.level}, "
-                f"received {inputs}"
-            )
-        input_at_level = inputs[self.level]
+            input_at_level = inputs
+            # raise ValueError(
+            #     "SpatialPyramidPooling expects input features to be a dict with int keys, "
+            #     f"received {inputs}"
+            # )
+        else:
+            if self.level not in inputs:
+                raise ValueError(
+                    f"SpatialPyramidPooling expect the input dict to contain key {self.level}, "
+                    f"received {inputs}"
+                )
+            input_at_level = inputs[self.level]
         result = []
         for channel in self.aspp_parallel_channels:
             result.append(

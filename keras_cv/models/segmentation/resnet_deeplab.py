@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import tensorflow as tf
+from keras_cv.layers.spatial_pyramid import SpatialPyramidPooling
 from tensorflow.keras import layers
 
 import keras_cv
@@ -165,6 +166,7 @@ class ResnetDeepLabV3(tf.keras.models.Model):
                     f"received {backbone}"
                 )
             self.backbone = backbone
+        self.aspp = SpatialPyramidPooling(level=4, dilation_rates=[6, 12, 18])
 
         self._segmentation_head_passed = segmentation_head
         if segmentation_head is None:
@@ -181,6 +183,7 @@ class ResnetDeepLabV3(tf.keras.models.Model):
 
     def call(self, inputs, training=None):
         backbone_output = self.backbone(inputs, training=training)
+        backbone_output = self.aspp(backbone_output)
         y_pred = self.segmentation_head(backbone_output, training=training)
         return y_pred
 
