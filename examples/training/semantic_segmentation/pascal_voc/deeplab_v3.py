@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 import keras_cv
 from keras_cv.datasets.pascal_voc.segmentation import load
 from keras_cv.models.segmentation.deeplab import DeepLabV3
-from keras_cv.models.segmentation.resnet_deeplab import ResnetDeepLabV3
+from keras_cv.models.segmentation.resnet_deeplab import DeeplabV3Plus
 
 flags.DEFINE_string(
     "weights_path",
@@ -193,6 +193,7 @@ def flip_fn(image, cls_seg):
 def proc_train_fn(examples):
     image = examples.pop("image")
     image = tf.cast(image, tf.float32)
+    image = tf.keras.applications.resnet50.preprocess_input(image)
     # image = resize_layer(image)
     cls_seg = examples.pop("class_segmentation")
     cls_seg = tf.cast(cls_seg, tf.float32)
@@ -236,11 +237,12 @@ with strategy.scope():
         boundaries=[30000 * 16 / global_batch],
         values=[base_lr, 0.1 * base_lr],
     )
-    backbone = keras_cv.models.ResNet50V2(
-        include_rescaling=True, weights="imagenet", include_top=False,
-        input_shape=[512, 512, 3]
-    )
-    model = ResnetDeepLabV3(classes=21, backbone=backbone, include_rescaling=True)
+    # backbone = keras_cv.models.ResNet50V2(
+    #     include_rescaling=True, weights="imagenet", include_top=False,
+    #     input_shape=[512, 512, 3]
+    # )
+    # model = ResnetDeepLabV3(classes=21, backbone=backbone, include_rescaling=True)
+    model = DeeplabV3Plus(image_size=512, num_classes=21)
     optimizer = tf.keras.optimizers.SGD(
         learning_rate=lr_decay, momentum=0.9, clipnorm=10.0
     )
@@ -249,6 +251,8 @@ with strategy.scope():
         tf.keras.metrics.SparseCategoricalCrossentropy(from_logits=True, ignore_class=255),
         tf.keras.metrics.MeanIoU(num_classes=21, sparse_y_pred=False),
     ]
+
+model.summary()
 
 callbacks = [
     tf.keras.callbacks.ModelCheckpoint(
