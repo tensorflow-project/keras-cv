@@ -35,6 +35,7 @@ This module contains following functionalities:
 import logging
 import multiprocessing
 import os.path
+import random
 import tarfile
 import xml
 
@@ -386,18 +387,30 @@ def _load_sbd_images(image_file_path, seg_cls_file_path, seg_obj_file_path):
 
 def _build_dataset_from_metadata(metadata):
     # The objects need some manual conversion to ragged tensor.
-    metadata["labels"] = tf.ragged.constant(metadata["labels"])
-    metadata["objects/label"] = tf.ragged.constant(metadata["objects/label"])
-    metadata["objects/pose"] = tf.ragged.constant(metadata["objects/pose"])
-    metadata["objects/is_truncated"] = tf.ragged.constant(
-        metadata["objects/is_truncated"]
-    )
-    metadata["objects/is_difficult"] = tf.ragged.constant(
-        metadata["objects/is_difficult"]
-    )
-    metadata["objects/bbox"] = tf.ragged.constant(
-        metadata["objects/bbox"], ragged_rank=1
-    )
+#    metadata["labels"] = tf.ragged.constant(metadata["labels"])
+#    metadata["objects/label"] = tf.ragged.constant(metadata["objects/label"])
+#    metadata["objects/pose"] = tf.ragged.constant(metadata["objects/pose"])
+#    metadata["objects/is_truncated"] = tf.ragged.constant(
+#        metadata["objects/is_truncated"]
+#    )
+#    metadata["objects/is_difficult"] = tf.ragged.constant(
+#        metadata["objects/is_difficult"]
+#    )
+#    metadata["objects/bbox"] = tf.ragged.constant(
+#        metadata["objects/bbox"], ragged_rank=1
+#    )
+
+    metadata.pop("labels")
+    metadata.pop("objects/label")
+    metadata.pop("objects/pose")
+    metadata.pop("objects/is_truncated")
+    metadata.pop("objects/is_difficult")
+    metadata.pop("objects/bbox")
+    metadata.pop("image/filename")
+    metadata.pop("height")
+    metadata.pop("width")
+
+    print("metadata keys {}".format(metadata.keys()))
 
     dataset = tf.data.Dataset.from_tensor_slices(metadata)
     dataset = dataset.map(_load_images, num_parallel_calls=tf.data.AUTOTUNE)
@@ -407,10 +420,13 @@ def _build_dataset_from_metadata(metadata):
 def _build_sbd_dataset_from_metadata(metadata):
     img_filepath = metadata["image/file_path"]
     cls_filepath = metadata["segmentation/class/file_path"]
-    obj_file_path = metadata["segmentation/object/file_path"]
+    obj_filepath = metadata["segmentation/object/file_path"]
 
     def md_gen():
-        for img_fp, cls_fp, obj_fp in zip(img_filepath, cls_filepath, obj_file_path):
+        c = list(zip(img_filepath, cls_filepath, obj_filepath))
+        random.shuffle(c)
+        for l in c:
+            img_fp, cls_fp, obj_fp = l
             yield _load_sbd_images(img_fp, cls_fp, obj_fp)
 
     dataset = tf.data.Dataset.from_generator(
@@ -492,6 +508,7 @@ def _load_sbd(
         SBD_URL, extracted_dir=extracted_dir, local_dir_path=data_dir
     )
     image_ids = _get_sbd_image_ids(data_dir, split)
+    random.shuffle(image_ids)
     # len(metadata) = #samples, metadata[i] is a dict.
     metadata = _build_sbd_metadata(data_dir, image_ids)
     dataset = _build_sbd_dataset_from_metadata(metadata)

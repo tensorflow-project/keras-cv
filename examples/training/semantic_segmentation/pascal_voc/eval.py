@@ -9,8 +9,9 @@ from keras_cv.models.segmentation.resnet_deeplab import DeeplabV3Plus
 global_batch = 1
 base_lr = 0.007 * global_batch / 16
 
-eval_ds = load(split="sbd_train", data_dir=None)
+#eval_ds = load(split="sbd_train", data_dir=None)
 # eval_ds = load(split="sbd_eval", data_dir=None)
+eval_ds = load(split="diff", data_dir=None)
 
 resize_layer = tf.keras.layers.Resizing(512, 512)
 
@@ -157,8 +158,6 @@ def proc_train_fn(examples):
     sample_weight = tf.equal(cls_seg, 255)
     zeros = tf.zeros_like(cls_seg)
     cls_seg = tf.where(sample_weight, zeros, cls_seg)
-    # tf.print("img min", tf.reduce_min(image))
-    # tf.print("img max", tf.reduce_max(image))
     # sample_weight = tf.cast(sample_weight, image.dtype)
     return image, cls_seg
 
@@ -188,6 +187,7 @@ metrics = [
 ]
 
 model.load_weights("./weights_01.h5")
+
 # min_val = 0
 # max_val = 0
 # for var in model.variables:
@@ -195,14 +195,15 @@ model.load_weights("./weights_01.h5")
 #     max_val = max(max_val, tf.reduce_max(var).numpy())
 # print("var max {}".format(max_val))
 # print("var min {}".format(min_val))
-# model.compile(optimizer=optimizer, loss=loss_fn, metrics=metrics)
-# model.evaluate(eval_ds)
 
-for examples in eval_ds.take(2):
-    image, y_true = examples
-    y_pred = model(image, training=False)
-    print("y_true {}".format(y_true.shape))
-    print("y_pred {}".format(y_pred.shape))
-    print("y_pred max {}".format(tf.reduce_max(y_pred)))
-    print("y_pred min {}".format(tf.reduce_min(y_pred)))
-    print("loss {}".format(loss_fn(y_true, y_pred)))
+model.compile(optimizer=optimizer, loss=loss_fn, metrics=metrics)
+model.evaluate(eval_ds)
+
+#for examples in eval_ds.take(2):
+#    image, y_true = examples
+#    y_pred = model(image, training=False)
+#    print("y_true {}".format(y_true.shape))
+#    print("y_pred {}".format(y_pred.shape))
+#    print("y_pred max {}".format(tf.reduce_max(y_pred)))
+#    print("y_pred min {}".format(tf.reduce_min(y_pred)))
+#    print("loss {}".format(loss_fn(y_true, y_pred)))
