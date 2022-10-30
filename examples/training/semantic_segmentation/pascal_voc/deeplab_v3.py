@@ -198,36 +198,32 @@ def proc_train_fn(examples):
     # image = resize_layer(image)
     cls_seg = examples.pop("class_segmentation")
     cls_seg = tf.cast(cls_seg, tf.float32)
-    # zeros = tf.zeros_like(cls_seg)
-    # mask = tf.equal(cls_seg, 255)
-    # cls_seg = tf.where(mask, zeros, cls_seg)
     # cls_seg = resize_layer(cls_seg)
     image, cls_seg = resize_fn(image, cls_seg)
     image, cls_seg = flip_fn(image, cls_seg)
     cls_seg = tf.cast(cls_seg, tf.uint8)
-    # tf.print("cls seg unique values", tf.unique(tf.reshape(cls_seg, [-1]))[0])
     sample_weight = tf.equal(cls_seg, 255)
     zeros = tf.zeros_like(cls_seg)
     cls_seg = tf.where(sample_weight, zeros, cls_seg)
-    # sample_weight = tf.cast(sample_weight, image.dtype)
     return image, cls_seg
 
+def proc_eval_fn(examples):
+    image = examples.pop("image")
+    image = tf.cast(image, tf.float32)
+    image = resize_layer(image)
+    cls_seg = examples.pop("class_segmentation")
+    cls_seg = tf.cast(cls_seg, tf.float32)
+    cls_seg = resize_layer(cls_seg)
+    cls_seg = tf.cast(cls_seg, tf.uint8)
+    sample_weight = tf.equal(cls_seg, 255)
+    zeros = tf.zeros_like(cls_seg)
+    cls_seg = tf.where(sample_weight, zeros, cls_seg)
+    return image, cls_seg
 
 train_ds = train_ds.map(proc_train_fn, num_parallel_calls=tf.data.AUTOTUNE)
 train_ds = train_ds.batch(global_batch)
 
-# for examples in train_ds.take(10):
-#     image, cls_seg = examples
-#     image = tf.cast(image[0], tf.uint8)
-#     cls_seg = cls_seg[0]
-#     plt.figure(figsize=(10, 10))
-#     plt.subplot(2, 1, 1)
-#     plt.imshow(image)
-#     plt.subplot(2, 1, 2)
-#     plt.imshow(cls_seg)
-#     plt.show()
-
-eval_ds = eval_ds.map(proc_train_fn, num_parallel_calls=tf.data.AUTOTUNE)
+eval_ds = eval_ds.map(proc_eval_fn, num_parallel_calls=tf.data.AUTOTUNE)
 eval_ds = eval_ds.batch(global_batch)
 
 train_ds = train_ds.shuffle(8)
@@ -251,8 +247,8 @@ with strategy.scope():
     metrics = [
         tf.keras.metrics.SparseCategoricalCrossentropy(ignore_class=255),
         tf.keras.metrics.MeanIoU(num_classes=21, sparse_y_pred=False),
+        tf.keras.metrics.SparseCategoricalAccuracy(),
     ]
-    test_loss = tf.keras.metrics.Mean(name='test_loss')
 
 # model.summary()
 
