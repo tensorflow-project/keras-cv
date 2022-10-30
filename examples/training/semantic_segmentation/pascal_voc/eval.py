@@ -1,68 +1,18 @@
-# Copyright 2022 The KerasCV Authors
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-Title: Train an Semantic Segmentation Model on Pascal VOC 2012 using KerasCV
-Author: [tanzhenyu](https://github.com/tanzhenyu)
-Date created: 2022/10/25
-Last modified: 2022/10/25
-Description: Use KerasCV to train a DeepLabV3 on Pascal VOC 2012.
-"""
-
-from random import sample
-import sys
-
 import tensorflow as tf
 from absl import flags
 import matplotlib.pyplot as plt
 
 import keras_cv
 from keras_cv.datasets.pascal_voc.segmentation import load
-from keras_cv.models.segmentation.deeplab import DeepLabV3
 from keras_cv.models.segmentation.resnet_deeplab import DeeplabV3Plus
 
-flags.DEFINE_string(
-    "weights_path",
-    "weights_{epoch:02d}.h5",
-    "Directory which will be used to store weight checkpoints.",
-)
-flags.DEFINE_string(
-    "tensorboard_path",
-    "logs",
-    "Directory which will be used to store tensorboard logs.",
-)
-FLAGS = flags.FLAGS
-FLAGS(sys.argv)
-
-# Try to detect an available TPU. If none is present, default to MirroredStrategy
-try:
-    tpu = tf.distribute.cluster_resolver.TPUClusterResolver.connect()
-    strategy = tf.distribute.TPUStrategy(tpu)
-except ValueError:
-    # MirroredStrategy is best for a single machine with one or multiple GPUs
-    strategy = tf.distribute.MirroredStrategy()
-print("Number of accelerators: ", strategy.num_replicas_in_sync)
-
-# parameters from FasterRCNN [paper](https://arxiv.org/pdf/1506.01497.pdf)
-
-local_batch = 2
-global_batch = local_batch * strategy.num_replicas_in_sync
+global_batch = 1
 base_lr = 0.007 * global_batch / 16
 
-train_ds = load(split="sbd_train", data_dir=None)
-eval_ds = load(split="sbd_eval", data_dir=None)
+eval_ds = load(split="sbd_train", data_dir=None)
+# eval_ds = load(split="sbd_eval", data_dir=None)
 
-resize_layer = tf.keras.layers.Resizing(512, 512, interpolation="nearest")
+resize_layer = tf.keras.layers.Resizing(512, 512)
 
 image_size = [512, 512, 3]
 
@@ -170,7 +120,7 @@ def resize_and_crop_masks(masks, image_scale, output_size, offset):
 
 def resize_fn(image, cls_seg):
     image, image_info = resize_and_crop_image(
-        image, image_size[:2], image_size[:2], 0.5, 2.0
+        image, image_size[:2], image_size[:2], 0.8, 1.25
     )
     image_scale = image_info[2, :]
     offset = image_info[3, :]
@@ -207,12 +157,11 @@ def proc_train_fn(examples):
     sample_weight = tf.equal(cls_seg, 255)
     zeros = tf.zeros_like(cls_seg)
     cls_seg = tf.where(sample_weight, zeros, cls_seg)
+    # tf.print("img min", tf.reduce_min(image))
+    # tf.print("img max", tf.reduce_max(image))
     # sample_weight = tf.cast(sample_weight, image.dtype)
     return image, cls_seg
 
-
-train_ds = train_ds.map(proc_train_fn, num_parallel_calls=tf.data.AUTOTUNE)
-train_ds = train_ds.batch(global_batch)
 
 # for examples in train_ds.take(10):
 #     image, cls_seg = examples
@@ -228,43 +177,32 @@ train_ds = train_ds.batch(global_batch)
 eval_ds = eval_ds.map(proc_train_fn, num_parallel_calls=tf.data.AUTOTUNE)
 eval_ds = eval_ds.batch(global_batch)
 
-train_ds = train_ds.shuffle(8)
-train_ds = train_ds.prefetch(2)
-
-with strategy.scope():
-    lr_decay = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
-        boundaries=[30000 * 16 / global_batch],
-        values=[base_lr, 0.1 * base_lr],
-    )
-    # backbone = keras_cv.models.ResNet50V2(
-    #     include_rescaling=True, weights="imagenet", include_top=False,
-    #     input_shape=[512, 512, 3]
-    # ).as_backbone()
-    # model = DeepLabV3(classes=21, backbone=backbone, include_rescaling=True)
-    model = DeeplabV3Plus(image_size=512, num_classes=21)
-    optimizer = tf.keras.optimizers.SGD(
-        learning_rate=lr_decay, momentum=0.9, clipnorm=10.0
-    )
-    loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(ignore_class=255)
-    metrics = [
-        tf.keras.metrics.SparseCategoricalCrossentropy(ignore_class=255),
-        tf.keras.metrics.MeanIoU(num_classes=21, sparse_y_pred=False),
-    ]
-    test_loss = tf.keras.metrics.Mean(name='test_loss')
-
-# model.summary()
-
-callbacks = [
-    tf.keras.callbacks.ModelCheckpoint(
-        filepath=FLAGS.weights_path,
-        monitor="val_mean_io_u",
-        save_best_only=True,
-        save_weights_only=True,
-    ),
-    tf.keras.callbacks.TensorBoard(
-        log_dir=FLAGS.tensorboard_path, write_steps_per_second=True
-    ),
+model = DeeplabV3Plus(image_size=512, num_classes=21)
+optimizer = tf.keras.optimizers.SGD(
+    learning_rate=0.007, momentum=0.9, clipnorm=10.0
+)
+loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(ignore_class=255)
+metrics = [
+    tf.keras.metrics.SparseCategoricalCrossentropy(ignore_class=255),
+    tf.keras.metrics.MeanIoU(num_classes=21, sparse_y_pred=False),
 ]
-model.compile(optimizer=optimizer, loss=loss_fn, metrics=metrics)
 
-model.fit(train_ds, epochs=100, validation_data=eval_ds, callbacks=callbacks)
+model.load_weights("./weights_01.h5")
+# min_val = 0
+# max_val = 0
+# for var in model.variables:
+#     min_val = min(min_val, tf.reduce_min(var).numpy())
+#     max_val = max(max_val, tf.reduce_max(var).numpy())
+# print("var max {}".format(max_val))
+# print("var min {}".format(min_val))
+# model.compile(optimizer=optimizer, loss=loss_fn, metrics=metrics)
+# model.evaluate(eval_ds)
+
+for examples in eval_ds.take(2):
+    image, y_true = examples
+    y_pred = model(image, training=False)
+    print("y_true {}".format(y_true.shape))
+    print("y_pred {}".format(y_pred.shape))
+    print("y_pred max {}".format(tf.reduce_max(y_pred)))
+    print("y_pred min {}".format(tf.reduce_min(y_pred)))
+    print("loss {}".format(loss_fn(y_true, y_pred)))

@@ -103,11 +103,13 @@ class SpatialPyramidPooling(tf.keras.layers.Layer):
         conv_sequential = tf.keras.Sequential(
             [
                 tf.keras.layers.Conv2D(
-                    filters=self.num_channels, kernel_size=(1, 1), use_bias=False
+                    filters=self.num_channels, kernel_size=(1, 1), use_bias=False,
+                    kernel_regularizer=tf.keras.regularizers.l2(0.0001),
                 ),
-                tf.keras.layers.BatchNormalization(),
+                tf.keras.layers.BatchNormalization(epsilon=1.001e-5),
                 tf.keras.layers.Activation(self.activation),
-            ]
+            ],
+            name="squential_conv1",
         )
         self.aspp_parallel_channels.append(conv_sequential)
 
@@ -121,39 +123,50 @@ class SpatialPyramidPooling(tf.keras.layers.Layer):
                         kernel_size=(3, 3),
                         padding="same",
                         dilation_rate=dilation_rate,
+                        kernel_regularizer=tf.keras.regularizers.l2(0.0001),
                         use_bias=False,
                     ),
-                    tf.keras.layers.BatchNormalization(),
+                    tf.keras.layers.BatchNormalization(epsilon=1.001e-5),
                     tf.keras.layers.Activation(self.activation),
-                ]
+                ],
+                name="sequential_dilation_{}".format(dilation_rate)
             )
             self.aspp_parallel_channels.append(conv_sequential)
-
+        
+        
         # Last channel is the global average pooling with conv2D 1x1 kernel.
         pool_sequential = tf.keras.Sequential(
             [
-                tf.keras.layers.GlobalAveragePooling2D(),
-                tf.keras.layers.Reshape((1, 1, channels)),
+                tf.keras.layers.GlobalAveragePooling2D(name='seq_pool_gap'),
+                tf.keras.layers.Reshape((1, 1, channels), name='seq_pool_res'),
                 tf.keras.layers.Conv2D(
-                    filters=self.num_channels, kernel_size=(1, 1), use_bias=False
+                    filters=self.num_channels, kernel_size=(1, 1), use_bias=False,
+                    kernel_regularizer=tf.keras.regularizers.l2(0.0001),
+                    name='seq_pool_conv'
                 ),
-                tf.keras.layers.BatchNormalization(),
-                tf.keras.layers.Activation(self.activation),
-                tf.keras.layers.Resizing(height, width, interpolation="bilinear"),
-            ]
+                tf.keras.layers.experimental.SyncBatchNormalization(),
+                # tf.keras.layers.BatchNormalization(momentum=0.9997, epsilon=1.001e-5, name='seq_pool_bn', fused=True),
+                tf.keras.layers.Activation(self.activation, name='seq_pool_act'),
+                tf.keras.layers.Resizing(height, width, interpolation="bilinear", name='seq_pool_rez'),
+                # tf.keras.layers.UpSampling2D(size=(height, width))
+            ],
+            name="sequential_pool",
         )
+        self.pool_sequential = pool_sequential
         self.aspp_parallel_channels.append(pool_sequential)
 
         # Final projection layers
         self.projection = tf.keras.Sequential(
             [
                 tf.keras.layers.Conv2D(
-                    filters=self.num_channels, kernel_size=(1, 1), use_bias=False
+                    filters=self.num_channels, kernel_size=(1, 1), use_bias=False,
+                    kernel_regularizer=tf.keras.regularizers.l2(0.0001),
                 ),
-                tf.keras.layers.BatchNormalization(),
+                tf.keras.layers.BatchNormalization(epsilon=1.001e-5),
                 tf.keras.layers.Activation(self.activation),
                 tf.keras.layers.Dropout(rate=self.dropout),
-            ]
+            ],
+            name="sequential_proj",
         )
 
     def call(self, inputs, training=None):
@@ -188,15 +201,40 @@ class SpatialPyramidPooling(tf.keras.layers.Layer):
                     f"received {inputs}"
                 )
             input_at_level = inputs[self.level]
+        # tf.debugging.assert_all_finite(input_at_level, "aspp input inf")
         result = []
         for channel in self.aspp_parallel_channels:
-            result.append(
-                tf.cast(
-                    channel(input_at_level, training=training), input_at_level.dtype
-                )
+            temp = tf.cast(
+                channel(input_at_level, training=training), input_at_level.dtype
             )
+            # tf.debugging.assert_all_finite(temp, "channel output inf {}".format(channel.name))
+            result.append(temp)
+
+        # temp = input_at_level
+        # for l in self.pool_sequential.layers:
+        #     tf.print(tf.reduce_min(temp), "layer {} input min".format(l.name))
+        #     tf.print(tf.reduce_max(temp), "layer {} input max".format(l.name))
+        #     for var in l.variables:
+        #         tf.print(tf.reduce_min(var), "layer var {} min".format(var.name))
+        #         tf.print(tf.reduce_max(var), "layer var {} max".format(var.name))
+        #     temp = l(temp, training=training)
+        #     tf.debugging.assert_all_finite(temp, "layer {} inf".format(l.name))
+
+        # for var in self.pool_sequential.layers[3].variables:
+        #     if "moving_variance" in var.name:
+        #         tf.debugging.assert_all_finite(var, "moving_variance inf {}".format(var.name))
+
+        # if tf.random.uniform([], minval=0., maxval=1.) > 0.99:
+        #     for var in self.pool_sequential.layers[3].variables:
+        #         if "moving_variance" in var.name:
+        #             tf.print(tf.reduce_max(var), "var {} max".format(var.name))
+        #             tf.print(tf.reduce_min(var), "var {} min".format(var.name))
+
         result = tf.concat(result, axis=-1)
         result = self.projection(result, training=training)
+        # tf.debugging.assert_all_finite(result, "aspp proj inf {}".format(channel.name))
+        if not isinstance(inputs, dict):
+            return result
         return {self.level: result}
 
     def get_config(self) -> Mapping[str, Any]:

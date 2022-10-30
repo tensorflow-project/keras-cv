@@ -20,6 +20,7 @@ Reference:
 import types
 
 import tensorflow as tf
+from tensorflow import keras
 from tensorflow.keras import backend
 from tensorflow.keras import layers
 
@@ -31,6 +32,7 @@ MODEL_CONFIGS = {
         "stackwise_filters": [64, 128, 256, 512],
         "stackwise_blocks": [2, 2, 2, 2],
         "stackwise_strides": [1, 2, 2, 2],
+        "stackwise_dilations": [1, 1, 1, 2],
     },
     "ResNet34V2": {
         "stackwise_filters": [64, 128, 256, 512],
@@ -190,7 +192,8 @@ def Block(filters, kernel_size=3, stride=1, dilation=1, conv_shortcut=False, nam
         s = stride if dilation == 1 else 1
         if conv_shortcut:
             shortcut = layers.Conv2D(
-                4 * filters, 1, strides=s, name=name + "_0_conv"
+                4 * filters, 1, strides=s, name=name + "_0_conv",
+                kernel_regularizer=keras.regularizers.l2(0.0001),
             )(use_preactivation)
         else:
             shortcut = (
@@ -199,7 +202,9 @@ def Block(filters, kernel_size=3, stride=1, dilation=1, conv_shortcut=False, nam
                 else x
             )
 
-        x = layers.Conv2D(filters, 1, strides=1, use_bias=False, name=name + "_1_conv")(
+        x = layers.Conv2D(
+            filters, 1, strides=1, use_bias=False, name=name + "_1_conv",
+            kernel_regularizer=keras.regularizers.l2(0.0001))(
             use_preactivation
         )
         x = layers.BatchNormalization(
@@ -215,6 +220,7 @@ def Block(filters, kernel_size=3, stride=1, dilation=1, conv_shortcut=False, nam
             use_bias=False,
             padding="same",
             dilation_rate=dilation,
+            kernel_regularizer=keras.regularizers.l2(0.0001),
             name=name + "_2_conv",
         )(x)
         x = layers.BatchNormalization(
@@ -222,7 +228,9 @@ def Block(filters, kernel_size=3, stride=1, dilation=1, conv_shortcut=False, nam
         )(x)
         x = layers.Activation("relu", name=name + "_2_relu")(x)
 
-        x = layers.Conv2D(4 * filters, 1, name=name + "_3_conv")(x)
+        x = layers.Conv2D(
+            4 * filters, 1, name=name + "_3_conv",
+            kernel_regularizer=keras.regularizers.l2(0.0001))(x)
         x = layers.Add(name=name + "_out")([shortcut, x])
         return x
 
@@ -345,7 +353,8 @@ def ResNetV2(
         x = layers.Rescaling(1 / 255.0)(x)
 
     x = layers.Conv2D(
-        64, 7, strides=2, use_bias=True, padding="same", name="conv1_conv"
+        64, 7, strides=2, use_bias=True, padding="same", name="conv1_conv",
+        kernel_regularizer=keras.regularizers.l2(0.0001),
     )(x)
 
     x = layers.MaxPooling2D(3, strides=2, padding="same", name="pool1_pool")(x)
@@ -360,7 +369,6 @@ def ResNetV2(
             stride=stackwise_strides[stack_index],
             dilations=stackwise_dilations[stack_index],
             block_fn=block_fn,
-            name=str(stack_index) + "_stack",
             first_shortcut=block_fn == Block or stack_index > 0,
             stack_index=stack_index,
         )(x)
@@ -472,6 +480,7 @@ def ResNet18V2(
         stackwise_filters=MODEL_CONFIGS["ResNet18V2"]["stackwise_filters"],
         stackwise_blocks=MODEL_CONFIGS["ResNet18V2"]["stackwise_blocks"],
         stackwise_strides=MODEL_CONFIGS["ResNet18V2"]["stackwise_strides"],
+        stackwise_dilations=MODEL_CONFIGS["ResNet50V2"]["stackwise_dilations"],
         include_rescaling=include_rescaling,
         include_top=include_top,
         name=name,

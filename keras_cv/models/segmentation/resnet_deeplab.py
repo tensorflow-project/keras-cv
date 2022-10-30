@@ -19,206 +19,6 @@ from tensorflow.keras import layers
 
 import keras_cv
 
-# BN_AXIS = 3
-
-# def Block(filters, kernel_size=3, stride=1, conv_shortcut=True, name=None):
-#     """A residual block.
-#     Args:
-#       x: input tensor.
-#       filters: integer, filters of the bottleneck layer.
-#       kernel_size: default 3, kernel size of the bottleneck layer.
-#       stride: default 1, stride of the first layer.
-#       conv_shortcut: default True, use convolution shortcut if True,
-#           otherwise identity shortcut.
-#       name: string, block label.
-#     Returns:
-#       Output tensor for the residual block.
-#     """
-
-#     def apply(x):
-#         if conv_shortcut:
-#             shortcut = layers.Conv2D(
-#                 4 * filters, 1, strides=stride, use_bias=False, name=name + "_0_conv"
-#             )(x)
-#             shortcut = layers.BatchNormalization(
-#                 axis=BN_AXIS, epsilon=1.001e-5, name=name + "_0_bn"
-#             )(shortcut)
-#         else:
-#             shortcut = x
-
-#         x = layers.Conv2D(
-#             filters, 1, strides=stride, use_bias=False, name=name + "_1_conv"
-#         )(x)
-#         x = layers.BatchNormalization(
-#             axis=BN_AXIS, epsilon=1.001e-5, name=name + "_1_bn"
-#         )(x)
-#         x = layers.Activation("relu", name=name + "_1_relu")(x)
-
-#         x = layers.Conv2D(
-#             filters, kernel_size, padding="SAME", dilation_rate=2, use_bias=False, name=name + "_2_conv"
-#         )(x)
-#         x = layers.BatchNormalization(
-#             axis=BN_AXIS, epsilon=1.001e-5, name=name + "_2_bn"
-#         )(x)
-#         x = layers.Activation("relu", name=name + "_2_relu")(x)
-
-#         x = layers.Conv2D(4 * filters, 1, use_bias=False, name=name + "_3_conv")(x)
-#         x = layers.BatchNormalization(
-#             axis=BN_AXIS, epsilon=1.001e-5, name=name + "_3_bn"
-#         )(x)
-
-#         x = layers.Add(name=name + "_add")([shortcut, x])
-#         x = layers.Activation("relu", name=name + "_out")(x)
-#         return x
-
-#     return apply
-
-# def Stack(filters, blocks, stride=2, name=None, block_fn=Block, first_shortcut=True):
-#     """A set of stacked residual blocks.
-#     Args:
-#       filters: integer, filters of the layers in a block.
-#       blocks: integer, blocks in the stacked blocks.
-#       stride1: default 2, stride of the first layer in the first block.
-#       name: string, stack label.
-#       block_fn: callable, `Block` or `BasicBlock`, the block function to stack.
-#       first_shortcut: default True, use convolution shortcut if True,
-#           otherwise identity shortcut.
-#     Returns:
-#       Output tensor for the stacked blocks.
-#     """
-
-#     def apply(x):
-#         x = block_fn(
-#             filters, stride=stride, name=name + "_block1", conv_shortcut=first_shortcut
-#         )(x)
-#         for i in range(2, blocks + 1):
-#             x = block_fn(filters, conv_shortcut=False, name=name + "_block" + str(i))(x)
-#         return x
-
-#     return apply
-
-# class ResnetDeepLabV3(tf.keras.models.Model):
-#     """A segmentation model based on the DeepLab v3.
-
-#     Args:
-#         classes: int, the number of classes for the detection model. Note that
-#             the classes doesn't contain the background class, and the classes
-#             from the data should be represented by integers with range
-#             [0, classes).
-#         include_rescaling: boolean, whether to Rescale the inputs. If set to True,
-#             inputs will be passed through a `Rescaling(1/255.0)` layer.
-#         backbone: an optional backbone network for the model. Can be a `tf.keras.layers.Layer`
-#             instance. The supported pre-defined backbone models are:
-#             1. "resnet50_v2", a ResNet50 V2 model
-#             Default to 'resnet50_v2'.
-#         decoder: an optional decoder network for segmentation model, e.g. FPN. The
-#             supported premade decoder is: "fpn". The decoder is called on
-#             the output of the backbone network to up-sample the feature output.
-#             Default to 'fpn'.
-#         segmentation_head: an optional `tf.keras.Layer` that predict the segmentation
-#             mask based on feature from backbone and feature from decoder.
-
-#     """
-
-#     def __init__(
-#         self,
-#         classes,
-#         include_rescaling,
-#         backbone="resnet50_v2",
-#         segmentation_head=None,
-#         **kwargs,
-#     ):
-#         super().__init__(**kwargs)
-
-#         self.classes = classes
-#         # ================== Backbone and weights. ==================
-#         if isinstance(backbone, str):
-#             supported_premade_backbone = [
-#                 "resnet50_v2",
-#             ]
-#             if backbone not in supported_premade_backbone:
-#                 raise ValueError(
-#                     "Supported premade backbones are: "
-#                     f'{supported_premade_backbone}, received "{backbone}"'
-#                 )
-#             self._backbone_passed = backbone
-#             if backbone == "resnet50_v2":
-#                 backbone = keras_cv.models.ResNet50(
-#                     include_rescaling=include_rescaling, include_top=False,
-#                     input_shape=[512, 512, 3]
-#                 )
-#                 inputs = tf.keras.Input(shape=[None, None, 3])
-#                 outputs = backbone(inputs)
-#                 # outputs = Stack(
-#                 #     filters=512,
-#                 #     blocks=3,
-#                 #     stride=1,
-#                 #     block_fn=Block,
-#                 #     name="4prime_stack",
-#                 # )(outputs)
-#                 backbone = tf.keras.Model(inputs=inputs, outputs=outputs)
-#                 # backbone = backbone.as_backbone()
-#                 self.backbone = backbone
-#         else:
-#             # TODO(scottzhu): Might need to do more assertion about the model
-#             if not isinstance(backbone, tf.keras.layers.Layer):
-#                 raise ValueError(
-#                     "Backbone need to be a `tf.keras.layers.Layer`, "
-#                     f"received {backbone}"
-#                 )
-#             self.backbone = backbone
-#         self.aspp = SpatialPyramidPooling(level=4, dilation_rates=[6, 12, 18])
-
-#         self._segmentation_head_passed = segmentation_head
-#         if segmentation_head is None:
-#             # Scale up the output when using FPN, to keep the output shape same as the
-#             # input shape.
-#             output_scale_factor = 16
-
-#             segmentation_head = (
-#                 keras_cv.models.segmentation.__internal__.SegmentationHead(
-#                     classes=classes, convs=0, output_scale_factor=output_scale_factor
-#                 )
-#             )
-#         self.segmentation_head = segmentation_head
-
-#     def call(self, inputs, training=None):
-#         backbone_output = self.backbone(inputs, training=training)
-#         backbone_output = self.aspp(backbone_output, training=training)
-#         y_pred = self.segmentation_head(backbone_output, training=training)
-#         return y_pred
-
-#     # TODO(tanzhenyu): consolidate how regularization should be applied to KerasCV.
-#     def compile(self, weight_decay=0.0001, **kwargs):
-#         self.weight_decay = weight_decay
-#         super().compile(**kwargs)
-
-#     def train_step(self, data):
-#         images, y_true, sample_weight = tf.keras.utils.unpack_x_y_sample_weight(data)
-#         with tf.GradientTape() as tape:
-#             y_pred = self(images, training=True)
-#             total_loss = self.compute_loss(images, y_true, y_pred, sample_weight)
-#             reg_losses = []
-#             if self.weight_decay:
-#                 for var in self.trainable_variables:
-#                     if "bn" not in var.name:
-#                         reg_losses.append(self.weight_decay * tf.nn.l2_loss(var))
-#                 l2_loss = tf.math.add_n(reg_losses)
-#                 total_loss += l2_loss
-#         self.optimizer.minimize(total_loss, self.trainable_variables, tape=tape)
-#         # tf.print("l2_loss", l2_loss)
-#         return self.compute_metrics(images, y_true, y_pred, sample_weight=sample_weight)
-
-#     def get_config(self):
-#         config = {
-#             "classes": self.classes,
-#             "backbone": self._backbone_passed,
-#             "decoder": self._decoder_passed,
-#             "segmentation_head": self._segmentation_head_passed,
-#         }
-#         base_config = super().get_config()
-#         return dict(list(base_config.items()) + list(config.items()))
-
 IMAGE_SIZE = 512
 
 def convolution_block(
@@ -235,54 +35,50 @@ def convolution_block(
         dilation_rate=dilation_rate,
         padding="same",
         use_bias=use_bias,
+        kernel_regularizer=keras.regularizers.l2(0.0001),
         kernel_initializer=keras.initializers.HeNormal(),
     )(block_input)
     x = layers.BatchNormalization()(x)
     return tf.nn.relu(x)
 
 
-def DilatedSpatialPyramidPooling(dspp_input):
-    dims = dspp_input.shape
-    x = layers.AveragePooling2D(pool_size=(dims[-3], dims[-2]))(dspp_input)
-    x = convolution_block(x, kernel_size=1, use_bias=True)
-    out_pool = layers.UpSampling2D(
-        size=(dims[-3] // x.shape[1], dims[-2] // x.shape[2]), interpolation="bilinear",
-    )(x)
-
-    out_1 = convolution_block(dspp_input, kernel_size=1, dilation_rate=1)
-    out_6 = convolution_block(dspp_input, kernel_size=3, dilation_rate=6)
-    out_12 = convolution_block(dspp_input, kernel_size=3, dilation_rate=12)
-    out_18 = convolution_block(dspp_input, kernel_size=3, dilation_rate=18)
-
-    x = layers.Concatenate(axis=-1)([out_pool, out_1, out_6, out_12, out_18])
-    output = convolution_block(x, kernel_size=1)
-    return output
-
 def DeeplabV3Plus(image_size, num_classes):
     model_input = keras.Input(shape=(image_size, image_size, 3))
-    resnet50 = keras.applications.ResNet50(
-        weights="imagenet", include_top=False, input_tensor=model_input
+    # resnet50 = keras.applications.ResNet50(
+    #     weights="imagenet", include_top=False, input_tensor=model_input
+    # )
+    resnet50 = keras_cv.models.ResNet50V2(
+        include_rescaling=True, include_top=False, weights="imagenet",
+        input_tensor=model_input
     )
-    x = resnet50.get_layer("conv4_block6_2_relu").output
-    x = DilatedSpatialPyramidPooling(x)
+    x = resnet50.get_layer("v2_stack_3_block3_out").output
+    # print("x shape {}".format(x.shape))
+    x = SpatialPyramidPooling(level=4, dilation_rates=[6, 12, 18], dropout=0.5)(x)
 
     input_a = layers.UpSampling2D(
-        size=(image_size // 4 // x.shape[1], image_size // 4 // x.shape[2]),
-        interpolation="bilinear",
-    )(x)
-    input_b = resnet50.get_layer("conv2_block3_2_relu").output
-    input_b = convolution_block(input_b, num_filters=48, kernel_size=1)
-
-    x = layers.Concatenate(axis=-1)([input_a, input_b])
-    x = convolution_block(x)
-    x = convolution_block(x)
-    x = layers.UpSampling2D(
         size=(image_size // x.shape[1], image_size // x.shape[2]),
-        interpolation="bilinear",
+        interpolation="nearest",
     )(x)
-    model_output = layers.Conv2D(num_classes, kernel_size=(1, 1), padding="same")(x)
+    x = input_a
+    # input_a = layers.UpSampling2D(
+    #     size=(image_size // 4 // x.shape[1], image_size // 4 // x.shape[2]),
+    #     interpolation="bilinear",
+    # )(x)
+    # input_b = resnet50.get_layer("conv2_block3_2_relu").output
+    # input_b = convolution_block(input_b, num_filters=48, kernel_size=1)
+
+    # x = layers.Concatenate(axis=-1)([input_a, input_b])
+    # x = convolution_block(x)
+    # x = convolution_block(x)
+    # x = layers.UpSampling2D(
+    #     size=(image_size // x.shape[1], image_size // x.shape[2]),
+    #     interpolation="bilinear",
+    # )(x)
+    model_output = layers.Conv2D(
+        filters=num_classes,
+        kernel_size=(1, 1), 
+        padding="same", 
+        kernel_regularizer=keras.regularizers.l2(0.0001),
+        activation="softmax")(x)
     return keras.Model(inputs=model_input, outputs=model_output)
 
-
-# model = DeeplabV3Plus(image_size=IMAGE_SIZE, num_classes=NUM_CLASSES)
-# model.summary()
