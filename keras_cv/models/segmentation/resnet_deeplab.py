@@ -74,6 +74,7 @@ def DeeplabV3Plus(image_size, num_classes):
     #     size=(image_size // x.shape[1], image_size // x.shape[2]),
     #     interpolation="bilinear",
     # )(x)
+    x = layers.Dropout(.2)(x)
     model_output = layers.Conv2D(
         filters=num_classes,
         kernel_size=(1, 1), 
