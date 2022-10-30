@@ -207,6 +207,7 @@ def _get_image_ids(data_dir, split):
         "train": "train.txt",
         "eval": "val.txt",
         "trainval": "trainval.txt",
+        "diff": "diff.txt",
     }
     with tf.io.gfile.GFile(
         os.path.join(data_dir, "ImageSets", "Segmentation", data_file_mapping[split]),
@@ -449,7 +450,7 @@ def load(
             download the data file, and unzip. It will be used as a cach directory.
             Default to None, and `~/.keras/pascal_voc_2012` will be used.
     """
-    supported_split_value = ["train", "eval", "trainval", "sbd_train", "sbd_eval"]
+    supported_split_value = ["train", "eval", "trainval", "diff", "sbd_train", "sbd_eval"]
     if split not in supported_split_value:
         raise ValueError(
             f"The support value for `split` are {supported_split_value}. "
