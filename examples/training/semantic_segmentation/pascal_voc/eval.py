@@ -13,7 +13,7 @@ base_lr = 0.007 * global_batch / 16
 # eval_ds = load(split="sbd_eval", data_dir=None)
 eval_ds = load(split="diff", data_dir=None)
 
-resize_layer = tf.keras.layers.Resizing(512, 512)
+resize_layer = tf.keras.layers.Resizing(512, 512, interpolation='nearest')
 
 image_size = [512, 512, 3]
 
@@ -161,19 +161,21 @@ def proc_train_fn(examples):
     # sample_weight = tf.cast(sample_weight, image.dtype)
     return image, cls_seg
 
+def proc_eval_fn(examples):
+    image = examples.pop("image")
+    image = tf.cast(image, tf.float32)
+    image = resize_layer(image)
+    cls_seg = examples.pop("class_segmentation")
+    cls_seg = tf.cast(cls_seg, tf.float32)
+    cls_seg = resize_layer(cls_seg)
+    cls_seg = tf.cast(cls_seg, tf.uint8)
+    sample_weight = tf.equal(cls_seg, 255)
+    zeros = tf.zeros_like(cls_seg)
+    cls_seg = tf.where(sample_weight, zeros, cls_seg)
+    return image, cls_seg
 
-# for examples in train_ds.take(10):
-#     image, cls_seg = examples
-#     image = tf.cast(image[0], tf.uint8)
-#     cls_seg = cls_seg[0]
-#     plt.figure(figsize=(10, 10))
-#     plt.subplot(2, 1, 1)
-#     plt.imshow(image)
-#     plt.subplot(2, 1, 2)
-#     plt.imshow(cls_seg)
-#     plt.show()
 
-eval_ds = eval_ds.map(proc_train_fn, num_parallel_calls=tf.data.AUTOTUNE)
+eval_ds = eval_ds.map(proc_eval_fn, num_parallel_calls=tf.data.AUTOTUNE)
 eval_ds = eval_ds.batch(global_batch)
 
 model = DeeplabV3Plus(image_size=512, num_classes=21)
@@ -186,7 +188,8 @@ metrics = [
     tf.keras.metrics.MeanIoU(num_classes=21, sparse_y_pred=False),
 ]
 
-model.load_weights("./weights_01.h5")
+weights = tf.keras.utils.get_file(origin="https://storage.googleapis.com/keras-cv/models/deeplab/voc/weights_final.h5", cache_subdir="models")
+model.load_weights(weights)
 
 # min_val = 0
 # max_val = 0
@@ -196,8 +199,23 @@ model.load_weights("./weights_01.h5")
 # print("var max {}".format(max_val))
 # print("var min {}".format(min_val))
 
-model.compile(optimizer=optimizer, loss=loss_fn, metrics=metrics)
-model.evaluate(eval_ds)
+# model.compile(optimizer=optimizer, loss=loss_fn, metrics=metrics)
+# model.evaluate(eval_ds)
+
+for examples in eval_ds.take(10):
+    image, cls_seg = examples
+    y_pred = model(image, training=False)[0]
+    y_pred = tf.argmax(y_pred, axis=-1)
+    image = tf.cast(image[0], tf.uint8)
+    cls_seg = cls_seg[0]
+    plt.figure(figsize=(10, 10))
+    plt.subplot(3, 1, 1)
+    plt.imshow(image)
+    plt.subplot(3, 1, 2)
+    plt.imshow(cls_seg)
+    plt.subplot(3, 1, 3)
+    plt.imshow(y_pred)
+    plt.show()
 
 #for examples in eval_ds.take(2):
 #    image, y_true = examples
